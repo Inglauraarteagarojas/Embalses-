@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visor de archivos TIFF/TIF</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            font-family: Arial, sans-serif;
+        }
+        .controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 1000;
+            background-color: white;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            max-width: 300px;
+        }
+        #map {
+            width: 100%;
+            height: 100vh;
+        }
+        button {
+            background-color: #4285f4;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        #error-message {
+            color: #d32f2f;
+            background-color: #ffebee;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+            display: none;
+        }
+    </style>
+    <!-- Incluir la biblioteca GeoTIFF.js correctamente -->
+    <script src="https://cdn.jsdelivr.net/npm/geotiff"></script>
+</head>
+<body>
+    <div class="controls">
+        <h2>Visor de archivos TIFF/TIF</h2>
+        <div>
+            <label for="tiff-file">Seleccionar archivo:</label><br>
+            <input type="file" id="tiff-file" accept=".tiff,.tif">
+            <button id="load-button">Cargar en el mapa</button>
+        </div>
+        
+        <div style="margin-top: 15px;">
+            <label for="opacity">Opacidad:</label>
+            <input type="range" id="opacity" min="0" max="1" step="0.1" value="0.7" style="width: 100%;">
+        </div>
+        
+        <div id="error-message"></div>
+    </div>
+    
+    <div id="map"></div>
+    
+    <script>
+        let map;
+        let tiffOverlay = null;
+
+        function showError(message) {
+            const errorElement = document.getElementById('error-message');
+            errorElement.textContent = message;
+            errorElement.style.display = 'block';
+        }
+
+        function initMap() {
+            map = new google.maps.Map(document.getElementById('map'), {
+                center: { lat: 4.5932, lng: -73.7082 },
+                zoom: 8,
+                mapTypeId: 'hybrid'
+            });
+
+            document.getElementById('load-button').addEventListener('click', loadTiffFile);
+            document.getElementById('opacity').addEventListener('input', function() {
+                if (tiffOverlay) {
+                    tiffOverlay.setOpacity(parseFloat(this.value));
+                }
+            });
+        }
+
+        async function loadTiffFile() {
+            document.getElementById('error-message').style.display = 'none';
+            const fileInput = document.getElementById('tiff-file');
+            if (!fileInput.files.length) {
+                showError('Por favor, selecciona un archivo TIFF/TIF.');
+                return;
+            }
+
+            const file = fileInput.files[0];
+
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+
+                if (typeof GeoTIFF === 'undefined') {
+                    throw new Error('La biblioteca GeoTIFF no está disponible. Recarga la página.');
+                }
+
+                // ✅ Solución al error: GeoTIFF.parse() → GeoTIFF.fromArrayBuffer()
+                const tiff = await GeoTIFF.fromArrayBuffer(arrayBuffer);
+                const image = await tiff.getImage();
+
+                const width = image.getWidth();
+                const height = image.getHeight();
+
+                const bbox = {
+                    north: 4.6309,
+                    south: 4.5554,
+                    east: -73.6810,
+                    west: -73.7354
+                };
+
+                const rasters = await image.readRasters();
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+
+                const imageData = ctx.createImageData(width, height);
+                const dataLength = width * height;
+
+                if (rasters.length >= 3) {
+                    for (let i = 0; i < dataLength; i++) {
+                        imageData.data[i * 4] = rasters[0][i];     
+                        imageData.data[i * 4 + 1] = rasters[1][i]; 
+                        imageData.data[i * 4 + 2] = rasters[2][i]; 
+                        imageData.data[i * 4 + 3] = 255;   
+                    }
+                } else {
+                    for (let i = 0; i < dataLength; i++) {
+                        const value = rasters[0][i];
+                        imageData.data[i * 4] = value;    
+                        imageData.data[i * 4 + 1] = value; 
+                        imageData.data[i * 4 + 2] = value; 
+                        imageData.data[i * 4 + 3] = 255;  
+                    }
+                }
+
+                ctx.putImageData(imageData, 0, 0);
+                displayTiffOnMap(canvas, bbox);
+
+            } catch (error) {
+                console.error('Error al procesar el archivo TIFF:', error);
+                showError('Error al procesar el archivo: ' + error.message);
+            }
+        }
+
+        function displayTiffOnMap(canvas, bbox) {
+            if (tiffOverlay) {
+                tiffOverlay.setMap(null);
+            }
+
+            const bounds = new google.maps.LatLngBounds(
+                new google.maps.LatLng(bbox.south, bbox.west),
+                new google.maps.LatLng(bbox.north, bbox.east)
+            );
+
+            tiffOverlay = new google.maps.GroundOverlay(
+                canvas.toDataURL(),
+                bounds,
+                {
+                    opacity: parseFloat(document.getElementById('opacity').value),
+                    clickable: false
+                }
+            );
+
+            tiffOverlay.setMap(map);
+            map.fitBounds(bounds);
+        }
+    </script>
+    
+    <!-- Cargar Google Maps API -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAvanFkaGlJKQZZ_YO9T09F7eJn7wQEKqo&callback=initMap" async defer></script>
+</body>
+</html>
