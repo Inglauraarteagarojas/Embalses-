@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Visor de archivos TIFF/TIF</title>
+    <title>Visor de archivos TIFF/TIF con Color</title>
     <style>
         body, html {
             margin: 0;
@@ -44,12 +44,11 @@
             display: none;
         }
     </style>
-    <!-- Incluir la biblioteca GeoTIFF.js correctamente -->
     <script src="https://cdn.jsdelivr.net/npm/geotiff"></script>
 </head>
 <body>
     <div class="controls">
-        <h2>Visor de archivos TIFF/TIF</h2>
+        <h2>Visor de archivos TIFF/TIF con Color</h2>
         <div>
             <label for="tiff-file">Seleccionar archivo:</label><br>
             <input type="file" id="tiff-file" accept=".tiff,.tif">
@@ -103,12 +102,10 @@
 
             try {
                 const arrayBuffer = await file.arrayBuffer();
-
                 if (typeof GeoTIFF === 'undefined') {
                     throw new Error('La biblioteca GeoTIFF no está disponible. Recarga la página.');
                 }
 
-                // ✅ Solución al error: GeoTIFF.parse() → GeoTIFF.fromArrayBuffer()
                 const tiff = await GeoTIFF.fromArrayBuffer(arrayBuffer);
                 const image = await tiff.getImage();
 
@@ -123,29 +120,26 @@
                 };
 
                 const rasters = await image.readRasters();
+                let data = rasters[0]; // Primera banda
+
+                // Reemplazar NaN y normalizar valores
+                const minVal = Math.min(...data.filter(v => !isNaN(v)));
+                const maxVal = Math.max(...data.filter(v => !isNaN(v)));
+
+                data = data.map(value => isNaN(value) ? 0 : (value - minVal) / (maxVal - minVal));
+
                 const canvas = document.createElement('canvas');
                 canvas.width = width;
                 canvas.height = height;
                 const ctx = canvas.getContext('2d');
-
                 const imageData = ctx.createImageData(width, height);
-                const dataLength = width * height;
-
-                if (rasters.length >= 3) {
-                    for (let i = 0; i < dataLength; i++) {
-                        imageData.data[i * 4] = rasters[0][i];     
-                        imageData.data[i * 4 + 1] = rasters[1][i]; 
-                        imageData.data[i * 4 + 2] = rasters[2][i]; 
-                        imageData.data[i * 4 + 3] = 255;   
-                    }
-                } else {
-                    for (let i = 0; i < dataLength; i++) {
-                        const value = rasters[0][i];
-                        imageData.data[i * 4] = value;    
-                        imageData.data[i * 4 + 1] = value; 
-                        imageData.data[i * 4 + 2] = value; 
-                        imageData.data[i * 4 + 3] = 255;  
-                    }
+                
+                for (let i = 0; i < data.length; i++) {
+                    const color = getColorFromValue(data[i]);
+                    imageData.data[i * 4] = color.r;
+                    imageData.data[i * 4 + 1] = color.g;
+                    imageData.data[i * 4 + 2] = color.b;
+                    imageData.data[i * 4 + 3] = 255;
                 }
 
                 ctx.putImageData(imageData, 0, 0);
@@ -155,6 +149,19 @@
                 console.error('Error al procesar el archivo TIFF:', error);
                 showError('Error al procesar el archivo: ' + error.message);
             }
+        }
+
+        function getColorFromValue(value) {
+            const colors = [
+                { r: 68, g: 1, b: 84 },  // Morado oscuro
+                { r: 59, g: 82, b: 139 }, // Azul
+                { r: 33, g: 145, b: 140 }, // Verde-azulado
+                { r: 94, g: 201, b: 98 },  // Verde
+                { r: 253, g: 231, b: 37 }  // Amarillo
+            ];
+
+            const index = Math.floor(value * (colors.length - 1));
+            return colors[index];
         }
 
         function displayTiffOnMap(canvas, bbox) {
@@ -181,7 +188,7 @@
         }
     </script>
     
-    <!-- Cargar Google Maps API -->
     <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAvanFkaGlJKQZZ_YO9T09F7eJn7wQEKqo&callback=initMap" async defer></script>
 </body>
 </html>
+
